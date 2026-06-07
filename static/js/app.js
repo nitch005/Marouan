@@ -164,6 +164,9 @@ document.addEventListener("DOMContentLoaded", () => {
             document.getElementById("main-webcam-video").srcObject = stream;
             document.getElementById("enroll-webcam-video").srcObject = stream;
             
+            document.getElementById("main-webcam-video").play().catch(e => console.error("Play main video error:", e));
+            document.getElementById("enroll-webcam-video").play().catch(e => console.error("Play enroll video error:", e));
+            
             // Populate camera selector if not already done
             if (!deviceId) {
                 const devices = await navigator.mediaDevices.enumerateDevices();
