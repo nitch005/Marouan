@@ -207,7 +207,7 @@ document.addEventListener("DOMContentLoaded", () => {
             let activeVideo = mainVideo;
             let activeCanvas = document.getElementById("main-webcam-canvas");
             
-            if (document.getElementById("view-enroll").classList.contains("active")) {
+            if (document.getElementById("enroll-view").classList.contains("active")) {
                 activeVideo = enrollVideo;
                 activeCanvas = document.getElementById("enroll-webcam-canvas");
             }
