@@ -147,6 +147,134 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
+    let currentStream = null;
+    let webcamInterval = null;
+
+    async function initWebcam(deviceId = null) {
+        const constraints = {
+            video: deviceId ? { deviceId: { exact: deviceId } } : true
+        };
+        try {
+            if (currentStream) {
+                currentStream.getTracks().forEach(t => t.stop());
+            }
+            const stream = await navigator.mediaDevices.getUserMedia(constraints);
+            currentStream = stream;
+            
+            document.getElementById("main-webcam-video").srcObject = stream;
+            document.getElementById("enroll-webcam-video").srcObject = stream;
+            
+            // Populate camera selector if not already done
+            if (!deviceId) {
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const videoDevices = devices.filter(d => d.kind === 'videoinput');
+                const select = document.getElementById("camera-select");
+                if (select) {
+                    select.innerHTML = '';
+                    videoDevices.forEach((device, index) => {
+                        const opt = document.createElement("option");
+                        opt.value = device.deviceId;
+                        opt.textContent = device.label || `Camera ${index + 1}`;
+                        select.appendChild(opt);
+                    });
+                    
+                    select.onchange = (e) => {
+                        initWebcam(e.target.value);
+                    };
+                }
+            }
+            
+            startFrameProcessing();
+        } catch (e) {
+            console.error("Camera access denied or error:", e);
+        }
+    }
+
+    function startFrameProcessing() {
+        if (webcamInterval) clearInterval(webcamInterval);
+        
+        // Use a hidden offscreen canvas to extract frames
+        const offscreenCanvas = document.createElement("canvas");
+        offscreenCanvas.width = 640;
+        offscreenCanvas.height = 480;
+        const ctx = offscreenCanvas.getContext("2d");
+        
+        webcamInterval = setInterval(async () => {
+            // Determine active video element
+            const mainVideo = document.getElementById("main-webcam-video");
+            const enrollVideo = document.getElementById("enroll-webcam-video");
+            
+            let activeVideo = mainVideo;
+            let activeCanvas = document.getElementById("main-webcam-canvas");
+            
+            if (document.getElementById("view-enroll").classList.contains("active")) {
+                activeVideo = enrollVideo;
+                activeCanvas = document.getElementById("enroll-webcam-canvas");
+            }
+            
+            if (activeVideo.readyState === activeVideo.HAVE_ENOUGH_DATA) {
+                // Draw current frame to offscreen canvas
+                ctx.drawImage(activeVideo, 0, 0, offscreenCanvas.width, offscreenCanvas.height);
+                const jpegData = offscreenCanvas.toDataURL("image/jpeg", 0.7);
+                
+                try {
+                    const res = await fetch("/api/process_frame", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ image: jpegData })
+                    });
+                    const data = await res.json();
+                    
+                    if (data.success) {
+                        drawOverlays(activeCanvas, activeVideo, data.faces);
+                    }
+                } catch (e) {
+                    // Fail silently for network dropped frames
+                }
+            }
+        }, 150); // ~7 FPS to reduce backend load
+    }
+
+    function drawOverlays(canvas, video, faces) {
+        // Match canvas size to video display size
+        canvas.width = video.clientWidth;
+        canvas.height = video.clientHeight;
+        const ctx = canvas.getContext("2d");
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        // Calculate scale since backend processes at 640x480 max
+        // Wait, drawImage scales the video to 640x480!
+        const scaleX = canvas.width / 640;
+        const scaleY = canvas.height / 480;
+        
+        faces.forEach(f => {
+            const [x, y, w, h] = f.box;
+            const sx = x * scaleX;
+            const sy = y * scaleY;
+            const sw = w * scaleX;
+            const sh = h * scaleY;
+            
+            const colorRGB = `rgb(${f.color[0]}, ${f.color[1]}, ${f.color[2]})`;
+            
+            ctx.strokeStyle = colorRGB;
+            ctx.lineWidth = 3;
+            // The canvas is flipped in CSS, so drawing normally will flip it properly visually.
+            ctx.strokeRect(sx, sy, sw, sh);
+            
+            // Name label (since canvas is flipped in CSS, text will be backwards unless we flip it locally here, but wait! The video and canvas are flipped. So text drawn on canvas will be backwards!)
+            // To fix this, we should flip the canvas context before drawing text.
+            ctx.save();
+            ctx.translate(sx + sw/2, sy);
+            ctx.scale(-1, 1);
+            ctx.fillStyle = colorRGB;
+            ctx.font = "16px Inter, sans-serif";
+            ctx.textAlign = "center";
+            ctx.fillText(f.label, 0, -10);
+            ctx.restore();
+        });
+    }
+
+    initWebcam();
     startDashboardPolling();
 
     // 2. Poll statistics and activity tickers

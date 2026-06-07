@@ -35,6 +35,7 @@ active_mode = "attendance"  # "attendance" or "enroll"
 enroll_name = ""
 enroll_count = 0
 enroll_max = 30
+CAMERA_INDEX = 0
 
 # State variables for check-in / check-out
 check_in_status = {}  # {name: "Checked-in" | "Checked-out"}
@@ -80,98 +81,86 @@ if not os.path.exists(CSV_PATH):
         writer = csv.writer(f)
         writer.writerow(["timestamp", "name", "status", "confidence"])
 
-# Background Camera Thread Function
-def camera_thread_func():
-    global camera, active_mode, enroll_name, enroll_count, check_in_status, last_seen, recognizer, labels, latest_jpeg_bytes
-    
-    # Initialize camera if not already done
-    if camera is None or not camera.isOpened():
-        camera = cv2.VideoCapture(0)
+# Video Processing Endpoints
+import base64
+@app.route('/api/process_frame', methods=['POST'])
+def process_frame():
+    global active_mode, enroll_name, enroll_count, check_in_status, last_seen, recognizer, labels
+    try:
+        data = request.json
+        if not data or 'image' not in data:
+            return jsonify({"error": "No image data"}), 400
         
-    while True:
-        success, frame = camera.read()
-        if not success:
-            time.sleep(0.03)
-            continue
-            
-        current_time = datetime.now()
+        img_data = data["image"].split(",")[1]
+        nparr = np.frombuffer(base64.b64decode(img_data), np.uint8)
+        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if frame is None:
+            return jsonify({"error": "Invalid image data"}), 400
+        
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         faces = cascade.detectMultiScale(gray, 1.2, 5)
         
-        # Track who was seen in this frame
+        results = []
+        current_time = datetime.now()
         seen_this_frame = {}
         
         for (x, y, w, h) in faces:
-            # Resize face for training / testing
             face_img = cv2.resize(gray[y:y+h, x:x+w], (200, 200))
             
-            # Draw overlay depending on mode
             if active_mode == "enroll" and enroll_name:
-                # Mode: Face Enrollment
-                # 1. Draw box and enrollment status
-                color = (255, 245, 0)  # Neon Cyan / Yellow
-                cv2.rectangle(frame, (x, y), (x+w, y+h), color, 2)
-                cv2.putText(frame, f"Enrolling: {enroll_name} ({enroll_count}/{enroll_max})", 
-                            (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
-                
-                # 2. Capture frame
                 person_dir = os.path.join(DATASET_DIR, enroll_name)
                 ensure_dir(person_dir)
                 img_path = os.path.join(person_dir, f"{enroll_count}.jpg")
                 cv2.imwrite(img_path, face_img)
                 enroll_count += 1
                 
-                # If done capturing, switch back to attendance mode
                 if enroll_count >= enroll_max:
                     active_mode = "attendance"
-                    # Train model in a separate thread automatically
+                    import threading
                     threading.Thread(target=train_model_backend).start()
                     
+                results.append({
+                    "box": [int(x), int(y), int(w), int(h)],
+                    "label": f"Enrolling: {enroll_name} ({enroll_count}/{enroll_max})",
+                    "color": [0, 245, 255] # BGR format mapped to RGB on client
+                })
             else:
-                # Mode: Attendance Tracking
                 name = "Unknown"
                 conf = 0.0
-                
-                # If recognizer is loaded, make prediction
                 if recognizer is not None:
                     try:
                         label_id, confidence = recognizer.predict(face_img)
-                        # LBPH confidence: lower is better. Under 75 is a reasonable match.
                         if confidence < 75:
                             name = labels.get(label_id, "Unknown")
                             conf = confidence
                     except Exception as e:
-                        print(f"[ERROR] Recognition error: {e}")
-                        
-                # Determine colors and label
+                        pass
+                
                 if name != "Unknown":
-                    color = (0, 255, 135) # Vibrant success emerald green
+                    color = [135, 255, 0] # Vibrant green
                     label_str = f"{name} ({conf:.1f})"
                     seen_this_frame[name] = True
                     last_seen[name] = current_time
                     
-                    # Log Check-in if not currently checked in
                     if name not in check_in_status or check_in_status[name] == "Checked-out":
                         check_in_status[name] = "Checked-in"
                         with open(CSV_PATH, "a", newline="") as f:
                             csv.writer(f).writerow([current_time.strftime("%Y-%m-%d %H:%M:%S"), name, "Checked-in", f"{conf:.2f}"])
-                        print(f"[LOG] {current_time} - {name} Checked-in")
                         
-                        # Capture and save check-in snapshot
                         name_snapshot_dir = os.path.join(SNAPSHOTS_DIR, name)
                         ensure_dir(name_snapshot_dir)
                         snapshot_filename = f"{current_time.strftime('%Y-%m-%d_%H-%M-%S')}.jpg"
                         cv2.imwrite(os.path.join(name_snapshot_dir, snapshot_filename), frame[y:y+h, x:x+w])
                 else:
-                    color = (0, 0, 255) # Red for Unknown / Unrecognized
+                    color = [255, 0, 0] # Red
                     label_str = "Unknown"
                     
-                # Draw boxes
-                cv2.rectangle(frame, (x, y), (x+w, y+h), color, 2)
-                cv2.putText(frame, label_str, (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
-        
-        # Check for Check-outs
-        # (If checked-in but not seen in this frame, and 10 seconds have elapsed)
+                results.append({
+                    "box": [int(x), int(y), int(w), int(h)],
+                    "label": label_str,
+                    "color": color
+                })
+                
         for name in list(check_in_status.keys()):
             if check_in_status[name] == "Checked-in" and name not in seen_this_frame:
                 if name in last_seen:
@@ -180,27 +169,10 @@ def camera_thread_func():
                         check_in_status[name] = "Checked-out"
                         with open(CSV_PATH, "a", newline="") as f:
                             csv.writer(f).writerow([current_time.strftime("%Y-%m-%d %H:%M:%S"), name, "Checked-out", ""])
-                        print(f"[LOG] {current_time} - {name} Checked-out (timeout)")
-                        
-        # Render frame to JPEG bytes
-        ret, jpeg = cv2.imencode('.jpg', frame)
-        if ret:
-            latest_jpeg_bytes = jpeg.tobytes()
-        
-        # Throttle to around 30 FPS
-        time.sleep(0.03)
-
-# Start background camera thread immediately
-threading.Thread(target=camera_thread_func, daemon=True).start()
-
-# Video Generator Function for Clients
-def gen_frames():
-    global latest_jpeg_bytes
-    while True:
-        if latest_jpeg_bytes is not None:
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + latest_jpeg_bytes + b'\r\n')
-        time.sleep(0.03)
+                            
+        return jsonify({"success": True, "faces": results})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
 
 # Background Training logic
 training_in_progress = False
@@ -278,11 +250,6 @@ def train_model_backend():
 def index():
     return render_template("index.html")
 
-@app.route('/video_feed')
-def video_feed():
-    return Response(gen_frames(),
-                    mimetype='multipart/x-mixed-replace; boundary=frame')
-
 @app.route('/api/start_enroll', methods=['POST'])
 def start_enroll():
     global active_mode, enroll_name, enroll_count
@@ -351,6 +318,14 @@ def train_model():
         
     threading.Thread(target=train_model_backend).start()
     return jsonify({"success": True, "message": "Training scheduled in the background."})
+
+@app.route('/api/system/status', methods=['GET'])
+def get_system_status():
+    return jsonify({
+        "status": "online",
+        "mode": active_mode,
+        "camera_fps": "60" # Mock FPS
+    })
 
 @app.route('/api/train_status', methods=['GET'])
 def get_train_status():
