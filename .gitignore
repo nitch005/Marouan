@@ -1,0 +1,22 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Local Biometric Datasets (Never commit private biometric face images!)
+dataset/
+
+# Local Attendance Records & Snapshots
+logs/
+*.csv
+
+# Trained LBPH Machine Learning Models
+face_model.yml
+labels.txt
+
+# Environment & IDE
+.venv/
+venv/
+ENV/
+.vscode/
+.idea/

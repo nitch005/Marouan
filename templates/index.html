@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FacePass - Face Recognition & Attendance Dashboard</title>
+    <!-- Google Fonts: Outfit & Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Custom Glassmorphism Stylesheet -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="app-container">
+        
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="brand">
+                <div class="logo-icon">
+                    <i class="fa-solid fa-face-smile"></i>
+                </div>
+                <h2>FacePass</h2>
+            </div>
+            
+            <nav class="sidebar-nav">
+                <button class="nav-btn active" data-target="dashboard-view" id="nav-dashboard">
+                    <i class="fa-solid fa-chart-line"></i>
+                    <span>Dashboard</span>
+                </button>
+                <button class="nav-btn" data-target="enroll-view" id="nav-enroll">
+                    <i class="fa-solid fa-user-plus"></i>
+                    <span>Face Enrollment</span>
+                </button>
+                <button class="nav-btn" data-target="logs-view" id="nav-logs">
+                    <i class="fa-solid fa-list-check"></i>
+                    <span>Attendance Logs</span>
+                </button>
+                <button class="nav-btn" data-target="members-view" id="nav-members">
+                    <i class="fa-solid fa-users-gear"></i>
+                    <span>Manage Database</span>
+                </button>
+            </nav>
+            
+            <div class="system-status">
+                <div class="status-indicator-dot online"></div>
+                <div class="status-info">
+                    <span class="status-title">System Status</span>
+                    <span class="status-desc" id="global-status-text">Active & Logging</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            
+            <!-- Top Header -->
+            <header class="top-header">
+                <div class="welcome-msg">
+                    <h1>Real-Time Face Recognition</h1>
+                    <p class="current-date" id="live-date">June 1, 2026</p>
+                </div>
+                
+                <div class="header-actions">
+                    <button class="action-btn-primary" id="btn-quick-train">
+                        <i class="fa-solid fa-brain"></i>
+                        <span>Train Model</span>
+                    </button>
+                </div>
+            </header>
+
+            <!-- VIEW 1: DASHBOARD VIEW -->
+            <section id="dashboard-view" class="view-section active">
+                
+                <!-- Stat Cards -->
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon purple">
+                            <i class="fa-solid fa-users"></i>
+                        </div>
+                        <div class="stat-details">
+                            <h3 id="stat-total-registered">--</h3>
+                            <p>Enrolled Faces</p>
+                        </div>
+                    </div>
+                    
+                    <div class="stat-card">
+                        <div class="stat-icon emerald">
+                            <i class="fa-solid fa-user-check"></i>
+                        </div>
+                        <div class="stat-details">
+                            <h3 id="stat-total-checkedin">--</h3>
+                            <p>Checked-In Now</p>
+                        </div>
+                    </div>
+                    
+                    <div class="stat-card">
+                        <div class="stat-icon cyan">
+                            <i class="fa-solid fa-circle-info"></i>
+                        </div>
+                        <div class="stat-details">
+                            <h3 id="stat-latest-seen">None</h3>
+                            <p>Last Seen Person</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Video & Live Stream Panel -->
+                <div class="dashboard-grid">
+                    <!-- Left: Camera Frame -->
+                    <div class="glass-card camera-card">
+                        <div class="card-header">
+                            <div class="card-title">
+                                <span class="pulse-dot"></span>
+                                <h3>Live Webcam Feed</h3>
+                            </div>
+                            <span class="badge" id="camera-fps">60 FPS</span>
+                        </div>
+                        <div class="video-container">
+                            <img src="{{ url_for('video_feed') }}" alt="Webcam Stream" class="webcam-stream" id="main-webcam-img">
+                            <div class="video-overlay-msg" id="camera-overlay-msg">
+                                <i class="fa-solid fa-camera"></i>
+                                <p>Webcam Active</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Right: Live Activity Stream -->
+                    <div class="glass-card logs-card">
+                        <div class="card-header">
+                            <div class="card-title">
+                                <i class="fa-solid fa-bolt"></i>
+                                <h3>Live Activity Stream</h3>
+                            </div>
+                            <span class="badge badge-purple">Realtime</span>
+                        </div>
+                        <div class="live-activity-stream" id="dashboard-activity-list">
+                            <!-- Populated dynamically via JS -->
+                            <div class="empty-state">
+                                <i class="fa-solid fa-spinner fa-spin"></i>
+                                <p>Listening for attendance events...</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- VIEW 2: FACE ENROLLMENT VIEW -->
+            <section id="enroll-view" class="view-section">
+                <div class="enrollment-grid">
+                    <!-- Form Control Card -->
+                    <div class="glass-card enroll-form-card">
+                        <div class="card-header">
+                            <div class="card-title">
+                                <i class="fa-solid fa-id-card"></i>
+                                <h3>Register New Profile</h3>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <p class="form-help">Enter a name to capture 30 high-definition face samples using the active webcam. These images will be resized and optimized automatically to train the LBPH recognition algorithm.</p>
+                            
+                            <form id="enroll-form" onsubmit="event.preventDefault();">
+                                <div class="form-group">
+                                    <label for="enroll-name">Full Name</label>
+                                    <div class="input-with-icon">
+                                        <i class="fa-solid fa-user"></i>
+                                        <input type="text" id="enroll-name" placeholder="e.g. John Doe" required autocomplete="off">
+                                    </div>
+                                </div>
+                                
+                                <div class="form-actions">
+                                    <button type="submit" class="btn-submit" id="btn-start-enroll">
+                                        <i class="fa-solid fa-camera"></i>
+                                        <span>Start Face Capture</span>
+                                    </button>
+                                    <button type="button" class="btn-cancel hidden" id="btn-cancel-enroll">
+                                        <i class="fa-solid fa-xmark"></i>
+                                        <span>Cancel Capture</span>
+                                    </button>
+                                </div>
+                            </form>
+                            
+                            <!-- Capture Progress Dashboard -->
+                            <div class="capture-progress-container hidden" id="capture-progress-area">
+                                <hr class="form-divider">
+                                <h4>Sample Capture Progress</h4>
+                                <div class="progress-radial-container">
+                                    <!-- Circular Progress Loader -->
+                                    <div class="progress-ring-wrapper">
+                                        <svg class="progress-ring" width="120" height="120">
+                                            <circle class="progress-ring-bg" stroke="rgba(255,255,255,0.05)" stroke-width="8" fill="transparent" r="50" cx="60" cy="60"/>
+                                            <circle class="progress-ring-bar" id="enroll-progress-circle" stroke="url(#cyanGrad)" stroke-width="8" fill="transparent" r="50" cx="60" cy="60" stroke-dasharray="314.16" stroke-dashoffset="314.16"/>
+                                            <defs>
+                                                <linearGradient id="cyanGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                                                    <stop offset="0%" stop-color="#00f5ff" />
+                                                    <stop offset="100%" stop-color="#8a2be2" />
+                                                </linearGradient>
+                                            </defs>
+                                        </svg>
+                                        <div class="progress-ring-value" id="enroll-progress-percent">0%</div>
+                                    </div>
+                                    <div class="progress-text-info">
+                                        <p class="progress-count-label" id="enroll-progress-counter">0 / 30 Images</p>
+                                        <p class="progress-status-desc">Hold still. Keep your face centered in the bounding box.</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Webcam Preview Card (Uses the same MJPEG video feed) -->
+                    <div class="glass-card enroll-preview-card">
+                        <div class="card-header">
+                            <div class="card-title">
+                                <i class="fa-solid fa-video"></i>
+                                <h3>Webcam Enrollment Capture</h3>
+                            </div>
+                            <span class="badge badge-cyan" id="enroll-mode-badge">Attendance Mode</span>
+                        </div>
+                        <div class="video-container mini-video">
+                            <!-- Reuses the exact same stream, rendering live bounding boxes -->
+                            <img src="{{ url_for('video_feed') }}" alt="Enrollment Preview" class="webcam-stream-mini" id="enroll-webcam-img">
+                            <div class="scan-grid" id="scan-grid-effect"></div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- VIEW 3: ATTENDANCE LOGS VIEW -->
+            <section id="logs-view" class="view-section">
+                <div class="glass-card table-card">
+                    <div class="card-header logs-header-flex">
+                        <div class="card-title">
+                            <i class="fa-solid fa-database"></i>
+                            <h3>Attendance Logs Database</h3>
+                        </div>
+                        
+                        <!-- Filter & Search Controls -->
+                        <div class="table-controls">
+                            <div class="search-box">
+                                <i class="fa-solid fa-magnifying-glass"></i>
+                                <input type="text" id="log-search-input" placeholder="Search by name...">
+                            </div>
+                            
+                            <select id="log-status-filter" class="custom-select">
+                                <option value="all">All Actions</option>
+                                <option value="Checked-in">Checked-in</option>
+                                <option value="Checked-out">Checked-out</option>
+                            </select>
+                            
+                            <button class="action-btn-secondary" id="btn-refresh-logs">
+                                <i class="fa-solid fa-rotate"></i>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="table-container">
+                        <table class="data-table" id="logs-table">
+                            <thead>
+                                <tr>
+                                    <th>Timestamp</th>
+                                    <th>Employee Name</th>
+                                    <th>Action / Status</th>
+                                    <th>Confidence</th>
+                                    <th>Snapshot Verification</th>
+                                </tr>
+                            </thead>
+                            <tbody id="logs-table-body">
+                                <!-- Populated dynamically -->
+                                <tr>
+                                    <td colspan="5" class="table-loading">
+                                        <i class="fa-solid fa-spinner fa-spin"></i> Loading attendance database...
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- VIEW 4: MEMBERS MANAGEMENT VIEW -->
+            <section id="members-view" class="view-section">
+                <div class="glass-card">
+                    <div class="card-header flex-header">
+                        <div class="card-title">
+                            <i class="fa-solid fa-users-viewfinder"></i>
+                            <h3>Enrolled Profiles Database</h3>
+                        </div>
+                        <button class="action-btn-secondary" id="btn-refresh-members">
+                            <i class="fa-solid fa-rotate"></i>
+                            <span>Reload Database</span>
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <p class="members-helper">This screen lists all individuals whose facial geometries have been registered. Deleting a profile will wipe their dataset folders and retrain the face recognition AI system automatically.</p>
+                        
+                        <div class="members-grid" id="members-list-grid">
+                            <!-- Populated dynamically via JS -->
+                            <div class="empty-state">
+                                <i class="fa-solid fa-spinner fa-spin"></i>
+                                <p>Scanning biometric directory...</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- MODAL 1: SNAPSHOT PREVIEW MODAL -->
+    <div class="modal" id="snapshot-modal">
+        <div class="modal-content glass-card">
+            <div class="modal-header">
+                <h3>Verification Snapshot</h3>
+                <button class="close-modal" id="btn-close-modal">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="snapshot-display-container">
+                    <img src="" alt="Snapshot Verification" id="modal-snapshot-img" class="snapshot-img-modal">
+                    <div class="snapshot-details-overlay">
+                        <p class="detail-name" id="modal-snapshot-name">John Doe</p>
+                        <p class="detail-time" id="modal-snapshot-time">2026-06-01 16:30:15</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL 2: SYSTEM LOADING / TRAINING OVERLAY -->
+    <div class="modal-overlay" id="loading-overlay">
+        <div class="loading-card glass-card">
+            <div class="neural-network-animation">
+                <div class="nodes-container">
+                    <div class="node pulse-node-1"></div>
+                    <div class="node pulse-node-2"></div>
+                    <div class="node pulse-node-3"></div>
+                </div>
+                <div class="connecting-line"></div>
+            </div>
+            <h3 id="loading-overlay-title">Training LBPH AI Model</h3>
+            <p id="loading-overlay-desc">Analyzing captured facial metrics. Re-calculating Local Binary Pattern histograms...</p>
+        </div>
+    </div>
+    
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
