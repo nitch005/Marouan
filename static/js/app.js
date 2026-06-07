@@ -31,8 +31,8 @@ document.addEventListener("DOMContentLoaded", () => {
                 datasets: [{
                     label: 'Check-ins',
                     data: data,
-                    borderColor: '#a855f7',
-                    backgroundColor: 'rgba(168, 85, 247, 0.2)',
+                    borderColor: '#8b5cf6',
+                    backgroundColor: 'rgba(139, 92, 246, 0.25)',
                     borderWidth: 3,
                     tension: 0.4,
                     fill: true
@@ -43,7 +43,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 maintainAspectRatio: false,
                 plugins: { legend: { display: false } },
                 scales: {
-                    y: { beginAtZero: true, ticks: { stepSize: 1, color: '#94a3b8' }, grid: { color: 'rgba(0,0,0,0.05)' } },
+                    y: { beginAtZero: true, ticks: { stepSize: 1, color: '#94a3b8' }, grid: { color: 'rgba(255, 255, 255, 0.05)' } },
                     x: { ticks: { color: '#94a3b8' }, grid: { display: false } }
                 }
             }
