@@ -10,6 +10,11 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <!-- FontAwesome Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Flatpickr for Date Range -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <!-- Chart.js for Analytics -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
     <!-- Custom Glassmorphism Stylesheet -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=2">
 </head>
@@ -145,6 +150,19 @@
                         </div>
                     </div>
                 </div>
+                
+                <!-- Analytics Chart Card -->
+                <div class="glass-card" style="margin-top: 30px;">
+                    <div class="card-header">
+                        <div class="card-title">
+                            <i class="fa-solid fa-chart-line"></i>
+                            <h3>Check-in Analytics (Last 7 Days)</h3>
+                        </div>
+                    </div>
+                    <div class="card-content" style="position: relative; height:300px; width:100%; padding:20px;">
+                        <canvas id="analyticsChart"></canvas>
+                    </div>
+                </div>
             </section>
 
             <!-- VIEW 2: FACE ENROLLMENT VIEW -->
@@ -239,31 +257,32 @@
                         
                         <!-- Filter & Search Controls -->
                         <div class="table-controls">
-                            <div class="search-box">
-                                <i class="fa-solid fa-magnifying-glass"></i>
-                                <input type="text" id="log-search-input" placeholder="Search by name...">
-                            </div>
-                            
-                            <select id="log-status-filter" class="custom-select">
-                                <option value="all">All Actions</option>
-                                <option value="Checked-in">Checked-in</option>
-                                <option value="Checked-out">Checked-out</option>
-                            </select>
-                            
-                            <button class="action-btn-secondary" id="btn-refresh-logs">
-                                <i class="fa-solid fa-rotate"></i>
-                            </button>
+                        <div class="search-box">
+                            <i class="fa-solid fa-search"></i>
+                            <input type="text" id="log-search-input" placeholder="Search by name...">
                         </div>
+                        <div class="search-box">
+                            <i class="fa-solid fa-calendar"></i>
+                            <input type="text" id="log-date-filter" placeholder="Select date range...">
+                        </div>
+                        <select id="log-status-filter" class="form-input">
+                            <option value="all">All Statuses</option>
+                            <option value="Checked-in">Checked-in</option>
+                            <option value="Checked-out">Checked-out</option>
+                        </select>
+                        <button class="action-btn" id="btn-refresh-logs">
+                            <i class="fa-solid fa-rotate-right"></i> Refresh
+                        </button>
                     </div>
                     
                     <div class="table-container">
                         <table class="data-table" id="logs-table">
                             <thead>
                                 <tr>
-                                    <th>Timestamp</th>
-                                    <th>Employee Name</th>
+                                    <th class="sortable" data-sort="timestamp" style="cursor:pointer">Timestamp <i class="fa-solid fa-sort"></i></th>
+                                    <th class="sortable" data-sort="name" style="cursor:pointer">Employee Name <i class="fa-solid fa-sort"></i></th>
                                     <th>Action / Status</th>
-                                    <th>Confidence</th>
+                                    <th class="sortable" data-sort="confidence" style="cursor:pointer">Confidence <i class="fa-solid fa-sort"></i></th>
                                     <th>Snapshot Verification</th>
                                 </tr>
                             </thead>
@@ -354,10 +373,39 @@
                 <div class="connecting-line"></div>
             </div>
             <h3 id="loading-overlay-title">Training LBPH AI Model</h3>
-            <p id="loading-overlay-desc">Analyzing captured facial metrics. Re-calculating Local Binary Pattern histograms...</p>
+            <p id="loading-overlay-desc">Analyzing captured facial metrics. Re-calculating Local Binary Pattern histograms...            </section>
         </div>
     </div>
     
-    <script src="{{ url_for('static', filename='js/app.js') }}?v=2"></script>
+    <!-- Member Profile Modal -->
+    <div class="modal-overlay" id="profile-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); backdrop-filter:blur(5px); z-index:1000; justify-content:center; align-items:center;">
+        <div class="glass-card profile-card" style="width:500px; max-width:90%; padding:20px; position:relative;">
+            <button id="close-profile-modal" style="position:absolute; top:15px; right:15px; background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:1.2rem;"><i class="fa-solid fa-xmark"></i></button>
+            <div style="text-align:center; margin-bottom:20px;">
+                <div style="width:80px; height:80px; border-radius:50%; background:var(--gradient-primary); margin:0 auto 10px auto; display:flex; justify-content:center; align-items:center; color:white; font-size:2rem;">
+                    <i class="fa-solid fa-user"></i>
+                </div>
+                <h2 id="profile-name" style="margin:0; color:var(--text-main);">Name</h2>
+            </div>
+            
+            <div style="display:flex; justify-content:space-around; margin-bottom:20px;">
+                <div style="text-align:center;">
+                    <h3 id="profile-checkins" style="margin:0; font-size:1.5rem; color:var(--primary);">0</h3>
+                    <p style="margin:0; font-size:0.8rem; color:var(--text-muted);">Total Check-ins</p>
+                </div>
+                <div style="text-align:center;">
+                    <h3 id="profile-confidence" style="margin:0; font-size:1.5rem; color:var(--success);">0%</h3>
+                    <p style="margin:0; font-size:0.8rem; color:var(--text-muted);">Avg. Confidence</p>
+                </div>
+            </div>
+            
+            <h4 style="margin-bottom:10px; color:var(--text-main);">Biometric Samples</h4>
+            <div id="profile-gallery" style="display:flex; gap:10px; overflow-x:auto; padding-bottom:10px; scrollbar-width:thin;">
+                <!-- Populated dynamically -->
+            </div>
+        </div>
+    </div>
+    
+    <script src="{{ url_for('static', filename='js/app.js') }}?v=3"></script>
 </body>
 </html>

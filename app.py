@@ -384,8 +384,32 @@ def get_logs():
     except Exception as e:
         print(f"[ERROR] Error reading CSV: {e}")
         
-    # Reverse to get latest first
-    logs_data = list(reversed(logs_data))
+    # Filtering by date
+    start_date = request.args.get('start_date')
+    end_date = request.args.get('end_date')
+    if start_date or end_date:
+        filtered_logs = []
+        for log in logs_data:
+            log_date = log["timestamp"].split()[0]
+            if start_date and log_date < start_date:
+                continue
+            if end_date and log_date > end_date:
+                continue
+            filtered_logs.append(log)
+        logs_data = filtered_logs
+
+    # Sorting
+    sort_by = request.args.get('sort_by', 'timestamp') # timestamp, name, confidence
+    sort_order = request.args.get('sort_order', 'desc') # asc, desc
+    
+    reverse_sort = (sort_order == 'desc')
+    
+    if sort_by == 'confidence':
+        logs_data.sort(key=lambda x: float(x["confidence"]) if x["confidence"] else 0, reverse=reverse_sort)
+    elif sort_by == 'name':
+        logs_data.sort(key=lambda x: x["name"].lower(), reverse=reverse_sort)
+    else: # timestamp
+        logs_data.sort(key=lambda x: x["timestamp"], reverse=reverse_sort)
     
     # Check if pagination is requested
     limit_arg = request.args.get('limit')
@@ -435,6 +459,79 @@ def get_members():
                     "image_count": img_count
                 })
     return jsonify(members_list)
+
+@app.route('/api/member_details/<name>', methods=['GET'])
+def get_member_details(name):
+    person_dir = os.path.join(DATASET_DIR, name)
+    if not os.path.exists(person_dir):
+        return jsonify({"success": False, "message": "Member not found"}), 404
+        
+    images = os.listdir(person_dir)
+    image_urls = [f"/dataset/{name}/{img}" for img in images]
+    
+    # Calculate stats
+    total_checkins = 0
+    conf_sum = 0
+    conf_count = 0
+    
+    if os.path.exists(CSV_PATH):
+        try:
+            with open(CSV_PATH, "r") as f:
+                reader = csv.reader(f)
+                next(reader, None)
+                for row in reader:
+                    if len(row) >= 3 and row[1] == name and row[2] == "Checked-in":
+                        total_checkins += 1
+                        if len(row) > 3 and row[3]:
+                            conf_sum += float(row[3])
+                            conf_count += 1
+        except:
+            pass
+            
+    avg_conf = (conf_sum / conf_count) if conf_count > 0 else 0
+    
+    return jsonify({
+        "success": True,
+        "name": name,
+        "total_checkins": total_checkins,
+        "avg_confidence": round(avg_conf, 1),
+        "images": image_urls
+    })
+
+@app.route('/dataset/<name>/<filename>')
+def serve_dataset_image(name, filename):
+    return send_from_directory(os.path.join(DATASET_DIR, name), filename)
+
+@app.route('/api/analytics', methods=['GET'])
+def get_analytics():
+    if not os.path.exists(CSV_PATH):
+        return jsonify({"labels": [], "data": []})
+        
+    # Get last 7 days check-in counts
+    try:
+        from collections import defaultdict
+        counts = defaultdict(int)
+        with open(CSV_PATH, "r") as f:
+            reader = csv.reader(f)
+            header = next(reader, None)
+            if header:
+                for row in reader:
+                    if len(row) >= 3 and row[2] == "Checked-in":
+                        date_str = row[0].split()[0] # get YYYY-MM-DD
+                        counts[date_str] += 1
+                        
+        # Sort dates
+        sorted_dates = sorted(counts.keys())[-7:] # last 7 days
+        labels = []
+        data = []
+        for d in sorted_dates:
+            labels.append(d)
+            data.append(counts[d])
+            
+        return jsonify({"labels": labels, "data": data})
+    except Exception as e:
+        print(f"[ERROR] Analytics error: {e}")
+        return jsonify({"labels": [], "data": []})
 
 @app.route('/api/members/<name>', methods=['DELETE'])
 def delete_member(name):

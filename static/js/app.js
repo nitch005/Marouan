@@ -9,9 +9,49 @@ document.addEventListener("DOMContentLoaded", () => {
     let enrollInterval = null;
     let statsInterval = null;
 
+    // Nav Items
+    const navItems = document.querySelectorAll(".nav-item");
+    const viewSections = document.querySelectorAll(".view-section");
+    
+    // Analytics Chart
+    let analyticsChart = null;
+    function initChart(labels, data) {
+        const ctx = document.getElementById('analyticsChart');
+        if (!ctx) return;
+        if (analyticsChart) {
+            analyticsChart.data.labels = labels;
+            analyticsChart.data.datasets[0].data = data;
+            analyticsChart.update();
+            return;
+        }
+        analyticsChart = new Chart(ctx.getContext('2d'), {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Check-ins',
+                    data: data,
+                    borderColor: '#a855f7',
+                    backgroundColor: 'rgba(168, 85, 247, 0.2)',
+                    borderWidth: 3,
+                    tension: 0.4,
+                    fill: true
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    y: { beginAtZero: true, ticks: { stepSize: 1, color: '#94a3b8' }, grid: { color: 'rgba(0,0,0,0.05)' } },
+                    x: { ticks: { color: '#94a3b8' }, grid: { display: false } }
+                }
+            }
+        });
+    }
+
     // Elements
     const navButtons = document.querySelectorAll(".nav-btn");
-    const viewSections = document.querySelectorAll(".view-section");
     const globalStatusText = document.getElementById("global-status-text");
     const globalStatusDot = document.querySelector(".status-indicator-dot");
 
@@ -63,6 +103,50 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Initialize Active View
     mainWebcamImg.src = "/video_feed";
+    
+    // Modal Logic
+    const profileModal = document.getElementById("profile-modal");
+    const closeProfileModal = document.getElementById("close-profile-modal");
+    
+    if (closeProfileModal) {
+        closeProfileModal.addEventListener("click", () => {
+            profileModal.style.display = "none";
+        });
+    }
+    
+    async function openProfileModal(name) {
+        document.getElementById("profile-name").innerText = name;
+        document.getElementById("profile-checkins").innerText = "...";
+        document.getElementById("profile-confidence").innerText = "...";
+        document.getElementById("profile-gallery").innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Loading...`;
+        
+        profileModal.style.display = "flex";
+        
+        try {
+            const res = await fetch(`/api/member_details/${name}`);
+            const data = await res.json();
+            
+            if (data.success) {
+                document.getElementById("profile-checkins").innerText = data.total_checkins;
+                document.getElementById("profile-confidence").innerText = data.avg_confidence + "%";
+                
+                const gallery = document.getElementById("profile-gallery");
+                gallery.innerHTML = "";
+                data.images.forEach(imgUrl => {
+                    const img = document.createElement("img");
+                    img.src = imgUrl;
+                    img.style.height = "100px";
+                    img.style.borderRadius = "8px";
+                    gallery.appendChild(img);
+                });
+            } else {
+                document.getElementById("profile-gallery").innerHTML = "Error loading profile.";
+            }
+        } catch (e) {
+            document.getElementById("profile-gallery").innerHTML = "Error connecting to server.";
+        }
+    }
+
     startDashboardPolling();
 
     // 2. Poll statistics and activity tickers
@@ -96,6 +180,15 @@ document.addEventListener("DOMContentLoaded", () => {
             const membersRes = await fetch("/api/members");
             const members = await membersRes.json();
             statTotalRegistered.innerText = members.length;
+
+            // Get analytics data
+            try {
+                const analyticsRes = await fetch("/api/analytics");
+                const analyticsData = await analyticsRes.json();
+                initChart(analyticsData.labels, analyticsData.data);
+            } catch (e) {
+                console.error("Failed to fetch analytics", e);
+            }
 
             // Get logs to compute checked-in status count (fetch up to 1000 latest to optimize)
             const logsRes = await fetch("/api/logs?limit=1000");
@@ -379,6 +472,45 @@ document.addEventListener("DOMContentLoaded", () => {
     const logSearchInput = document.getElementById("log-search-input");
     const logStatusFilter = document.getElementById("log-status-filter");
     const btnRefreshLogs = document.getElementById("btn-refresh-logs");
+    const logDateFilter = document.getElementById("log-date-filter");
+    
+    let dateRange = { start: "", end: "" };
+    if (logDateFilter) {
+        flatpickr(logDateFilter, {
+            mode: "range",
+            dateFormat: "Y-m-d",
+            onChange: function(selectedDates, dateStr, instance) {
+                if (selectedDates.length === 2) {
+                    dateRange.start = instance.formatDate(selectedDates[0], "Y-m-d");
+                    dateRange.end = instance.formatDate(selectedDates[1], "Y-m-d");
+                    logsCurrentPage = 1;
+                    fetchLogs();
+                } else if (selectedDates.length === 0) {
+                    dateRange = { start: "", end: "" };
+                    logsCurrentPage = 1;
+                    fetchLogs();
+                }
+            }
+        });
+    }
+
+    // Sort state
+    let logsSortBy = "timestamp";
+    let logsSortOrder = "desc";
+    
+    document.querySelectorAll(".sortable").forEach(th => {
+        th.addEventListener("click", () => {
+            const field = th.getAttribute("data-sort");
+            if (logsSortBy === field) {
+                logsSortOrder = logsSortOrder === "desc" ? "asc" : "desc";
+            } else {
+                logsSortBy = field;
+                logsSortOrder = "desc";
+            }
+            logsCurrentPage = 1;
+            fetchLogs();
+        });
+    });
     
     // Pagination state
     let logsCurrentPage = 1;
@@ -418,7 +550,11 @@ document.addEventListener("DOMContentLoaded", () => {
             </tr>`;
             
         try {
-            const res = await fetch(`/api/logs?page=${logsCurrentPage}&limit=${logsLimit}`);
+            let url = `/api/logs?page=${logsCurrentPage}&limit=${logsLimit}&sort_by=${logsSortBy}&sort_order=${logsSortOrder}`;
+            if (dateRange.start && dateRange.end) {
+                url += `&start_date=${dateRange.start}&end_date=${dateRange.end}`;
+            }
+            const res = await fetch(url);
             const data = await res.json();
             
             // The API returns pagination metadata and logs array
@@ -567,24 +703,43 @@ document.addEventListener("DOMContentLoaded", () => {
             return;
         }
 
-        let html = "";
+        membersListGrid.innerHTML = "";
         members.forEach(member => {
-            const avatarChar = member.name.charAt(0).toUpperCase();
-            html += `
-                <div class="member-card">
-                    <div class="member-avatar">${avatarChar}</div>
-                    <div class="member-info">
-                        <h4>${member.name}</h4>
-                        <p>${member.image_count} Samples Captured</p>
-                    </div>
-                    <button class="btn-delete-member" onclick="deleteMember('${member.name}')">
-                        <i class="fa-solid fa-trash-can"></i>
-                        <span>Delete Profile</span>
+            const card = document.createElement("div");
+            card.className = "member-card";
+            card.innerHTML = `
+                <div class="member-avatar">
+                    <i class="fa-solid fa-user"></i>
+                </div>
+                <h3>${member.name}</h3>
+                <p>${member.image_count} Samples</p>
+                <div style="display:flex; gap:5px; margin-top:10px;">
+                    <button class="action-btn-secondary btn-inspect-member" data-name="${member.name}" style="flex:1; padding:8px; font-size:0.8rem;">
+                        <i class="fa-solid fa-eye"></i> Inspect
                     </button>
-                </div>`;
+                    <button class="action-btn-danger btn-delete-member" data-name="${member.name}" style="flex:1; padding:8px; font-size:0.8rem;">
+                        <i class="fa-solid fa-trash"></i>
+                    </button>
+                </div>
+            `;
+            membersListGrid.appendChild(card);
         });
-
-        membersListGrid.innerHTML = html;
+        
+        // Add event listeners to inspect buttons
+        document.querySelectorAll(".btn-inspect-member").forEach(btn => {
+            btn.addEventListener("click", async (e) => {
+                const name = e.currentTarget.getAttribute("data-name");
+                openProfileModal(name);
+            });
+        });
+        
+        // Add event listeners to delete buttons
+        document.querySelectorAll(".btn-delete-member").forEach(btn => {
+            btn.addEventListener("click", async (e) => {
+                const name = e.currentTarget.getAttribute("data-name");
+                deleteMember(name);
+            });
+        });
     }
 
     window.deleteMember = async function(name) {
