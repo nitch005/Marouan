@@ -30,6 +30,7 @@ ensure_dir(SNAPSHOTS_DIR)
 # Global variables for recognition & enrollment
 lock = threading.Lock()
 camera = None
+latest_jpeg_bytes = None
 active_mode = "attendance"  # "attendance" or "enroll"
 enroll_name = ""
 enroll_count = 0
@@ -79,9 +80,9 @@ if not os.path.exists(CSV_PATH):
         writer = csv.writer(f)
         writer.writerow(["timestamp", "name", "status", "confidence"])
 
-# Video Generator Function
-def gen_frames():
-    global camera, active_mode, enroll_name, enroll_count, check_in_status, last_seen, recognizer, labels
+# Background Camera Thread Function
+def camera_thread_func():
+    global camera, active_mode, enroll_name, enroll_count, check_in_status, last_seen, recognizer, labels, latest_jpeg_bytes
     
     # Initialize camera if not already done
     if camera is None or not camera.isOpened():
@@ -183,13 +184,22 @@ def gen_frames():
                         
         # Render frame to JPEG bytes
         ret, jpeg = cv2.imencode('.jpg', frame)
-        if not ret:
-            continue
-            
-        yield (b'--frame\r\n'
-               b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n')
+        if ret:
+            latest_jpeg_bytes = jpeg.tobytes()
         
         # Throttle to around 30 FPS
+        time.sleep(0.03)
+
+# Start background camera thread immediately
+threading.Thread(target=camera_thread_func, daemon=True).start()
+
+# Video Generator Function for Clients
+def gen_frames():
+    global latest_jpeg_bytes
+    while True:
+        if latest_jpeg_bytes is not None:
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + latest_jpeg_bytes + b'\r\n')
         time.sleep(0.03)
 
 # Background Training logic
@@ -279,11 +289,14 @@ def start_enroll():
     data = request.get_json() or {}
     name = data.get("name", "").strip()
     
-    if not name:
-        return jsonify({"success": False, "message": "Name cannot be empty."}), 400
+    if not name or len(name) < 3:
+        return jsonify({"success": False, "message": "Name must be at least 3 characters."}), 400
         
     # Standardize name for directory creation
     name = "".join(c for c in name if c.isalnum() or c in (' ', '_', '-')).strip()
+    
+    # Path traversal and long name protection
+    name = name[:50]
     
     # Check if directory exists and is populated
     person_dir = os.path.join(DATASET_DIR, name)
@@ -350,7 +363,7 @@ def get_train_status():
 @app.route('/api/logs', methods=['GET'])
 def get_logs():
     if not os.path.exists(CSV_PATH):
-        return jsonify([])
+        return jsonify({"logs": [], "total": 0, "page": 1, "pages": 1}) if request.args.get('page') else jsonify([])
         
     logs_data = []
     try:
@@ -371,8 +384,43 @@ def get_logs():
     except Exception as e:
         print(f"[ERROR] Error reading CSV: {e}")
         
-    # Return reversed logs (latest first)
-    return jsonify(list(reversed(logs_data)))
+    # Reverse to get latest first
+    logs_data = list(reversed(logs_data))
+    
+    # Check if pagination is requested
+    limit_arg = request.args.get('limit')
+    page_arg = request.args.get('page')
+    
+    if page_arg and limit_arg:
+        try:
+            page = int(page_arg)
+            limit = int(limit_arg)
+        except ValueError:
+            page = 1
+            limit = 20
+        
+        total = len(logs_data)
+        pages = (total + limit - 1) // limit if total > 0 else 1
+        page = max(1, min(page, pages))
+        
+        start_idx = (page - 1) * limit
+        end_idx = start_idx + limit
+        paginated_logs = logs_data[start_idx:end_idx]
+        
+        return jsonify({
+            "logs": paginated_logs,
+            "total": total,
+            "page": page,
+            "pages": pages
+        })
+    elif limit_arg:
+        try:
+            limit = int(limit_arg)
+            return jsonify(logs_data[:limit])
+        except ValueError:
+            return jsonify(logs_data)
+    else:
+        return jsonify(logs_data)
 
 @app.route('/api/members', methods=['GET'])
 def get_members():

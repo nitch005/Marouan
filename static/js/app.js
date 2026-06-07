@@ -97,8 +97,8 @@ document.addEventListener("DOMContentLoaded", () => {
             const members = await membersRes.json();
             statTotalRegistered.innerText = members.length;
 
-            // Get logs to compute checked-in status count
-            const logsRes = await fetch("/api/logs");
+            // Get logs to compute checked-in status count (fetch up to 1000 latest to optimize)
+            const logsRes = await fetch("/api/logs?limit=1000");
             const logs = await logsRes.json();
 
             // Track active checked in
@@ -130,7 +130,7 @@ document.addEventListener("DOMContentLoaded", () => {
     // 4. Fetch Live Activity Stream Ticker
     async function fetchLiveActivity() {
         try {
-            const res = await fetch("/api/logs");
+            const res = await fetch("/api/logs?limit=10");
             const logs = await res.json();
             
             const activityList = document.getElementById("dashboard-activity-list");
@@ -379,11 +379,35 @@ document.addEventListener("DOMContentLoaded", () => {
     const logSearchInput = document.getElementById("log-search-input");
     const logStatusFilter = document.getElementById("log-status-filter");
     const btnRefreshLogs = document.getElementById("btn-refresh-logs");
+    
+    // Pagination state
+    let logsCurrentPage = 1;
+    const logsLimit = 20;
+    const btnPrevPage = document.getElementById("btn-prev-page");
+    const btnNextPage = document.getElementById("btn-next-page");
+    const paginationInfo = document.getElementById("pagination-info");
+    
     let cachedLogs = [];
 
-    btnRefreshLogs.addEventListener("click", fetchLogs);
+    btnRefreshLogs.addEventListener("click", () => { logsCurrentPage = 1; fetchLogs(); });
     logSearchInput.addEventListener("input", filterLogs);
     logStatusFilter.addEventListener("change", filterLogs);
+    
+    if(btnPrevPage) {
+        btnPrevPage.addEventListener("click", () => {
+            if (logsCurrentPage > 1) {
+                logsCurrentPage--;
+                fetchLogs();
+            }
+        });
+    }
+    
+    if(btnNextPage) {
+        btnNextPage.addEventListener("click", () => {
+            logsCurrentPage++;
+            fetchLogs();
+        });
+    }
 
     async function fetchLogs() {
         logsTableBody.innerHTML = `
@@ -394,8 +418,19 @@ document.addEventListener("DOMContentLoaded", () => {
             </tr>`;
             
         try {
-            const res = await fetch("/api/logs");
-            cachedLogs = await res.json();
+            const res = await fetch(`/api/logs?page=${logsCurrentPage}&limit=${logsLimit}`);
+            const data = await res.json();
+            
+            // The API returns pagination metadata and logs array
+            cachedLogs = data.logs || [];
+            
+            if (btnPrevPage && btnNextPage && paginationInfo) {
+                paginationInfo.innerText = `Page ${data.page} of ${data.pages}`;
+                btnPrevPage.disabled = data.page <= 1;
+                btnNextPage.disabled = data.page >= data.pages;
+                logsCurrentPage = data.page;
+            }
+            
             renderLogs(cachedLogs);
         } catch (e) {
             console.error("Error reading database logs:", e);
